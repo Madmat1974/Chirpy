@@ -17,9 +17,13 @@ func main() {
 		IdleTimeout:  15 * time.Second,
 	}
 
+	fs := http.FileServer(http.Dir("."))
+	mux.Handle("/", fs)
+
 	fmt.Printf("Starting server on %s", server.Addr)
 	err := server.ListenAndServe()
 	if err != nil {
 		fmt.Printf("Server failed to start: %v", err)
 	}
+
 }
