@@ -1,19 +1,39 @@
 package main
 
-import (
-	"fmt"
-	"net/http"
+import ( 
+    "database/sql"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "os"
+    "strings"
 	"sync/atomic"
-	"time"
-	"encoding/json"
-	"strings"
+    "time"
 
+    "github.com/joho/godotenv"
+    _ "github.com/lib/pq"
+
+    "github.com/google/uuid"
+    "github.com/Madmat1974/Chirpy.git/internal/database"
 )
 
-func main() {
 
+func main() {
+	
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	fmt.Println("DB_URL:", dbURL)
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil { panic(err) }
+	if err := db.Ping(); err != nil { panic(err) }
+	defer db.Close()
+	queries := database.New(db)
+
+	cfg := apiConfig{
+    db:       queries,
+    platform: os.Getenv("PLATFORM"),
+}
 	const filepathRoot = "."
-	apiCfg := &apiConfig{}
 	mux := http.NewServeMux()
 
 	server := &http.Server{
@@ -27,20 +47,20 @@ func main() {
 	fs := http.FileServer(http.Dir(filepathRoot))
 	handler := http.StripPrefix("/app", fs)
 	mux.HandleFunc("GET /api/healthz", healthHandler)
-	mux.Handle("/app/", apiCfg.middlewareMetricsInc(handler))
+	mux.Handle("/app/", cfg.middlewareMetricsInc(handler))
 	mux.HandleFunc("/app", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/app/", http.StatusMovedPermanently)
 	})
-	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
-	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
-	mux.HandleFunc("POST /api/validate_chirp", apiCfg.handlerValidateChirp)
+	mux.HandleFunc("GET /admin/metrics", cfg.handlerMetrics)
+	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
+	mux.HandleFunc("POST /api/validate_chirp", cfg.handlerValidateChirp)
+	mux.HandleFunc("POST /api/users", cfg.userCreate)
 
 	fmt.Printf("Starting server on %s", server.Addr)
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err != nil {
 		fmt.Printf("Server failed to start: %v", err)
 	}
-
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -50,9 +70,47 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type apiConfig struct {
-	fileserverHits atomic.Int32
+	fileserverHits 	atomic.Int32
+	db 		*database.Queries
+	platform string
 }
 
+type userCreateParams struct {
+	Email string `json:"email"`
+}
+
+type User struct {
+	ID 			uuid.UUID `json:"id"`
+	CreatedAt	time.Time `json:"created_at"`
+	UpdatedAt	time.Time `json:"updated_at"`
+	Email		string	  `json:"email"`
+}
+
+func (cfg *apiConfig) userCreate(w http.ResponseWriter, r *http.Request) {
+	var params userCreateParams
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if strings.TrimSpace(params.Email) == "" {
+		respondWithError(w, http.StatusBadRequest, "email required")
+		return
+	}
+
+	dbUser, err := cfg.db.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not create user")
+		return
+	}
+
+	resp := User {
+		ID:			dbUser.ID,
+		CreatedAt:	dbUser.CreatedAt,
+		UpdatedAt:	dbUser.UpdatedAt,
+		Email:		dbUser.Email,
+	}
+	respondWithJSON(w, http.StatusCreated, resp)
+}
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,9 +130,18 @@ func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, tmpl, cfg.fileserverHits.Load())
 }
 
-func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
-	cfg.fileserverHits.Store(0)
-	w.WriteHeader(http.StatusOK)
+func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) { // go
+    if cfg.platform != "dev" {
+        respondWithError(w, http.StatusForbidden, "forbidden")
+        return
+    }
+    // delete users in DB via your sqlc reset query
+    if err := cfg.db.DeleteUsers(r.Context()); err != nil { // name may differ
+        respondWithError(w, http.StatusInternalServerError, "reset failed")
+        return
+    }
+    cfg.fileserverHits.Store(0)
+    w.WriteHeader(http.StatusOK)
 }
 
 func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
