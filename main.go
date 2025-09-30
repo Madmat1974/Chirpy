@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 	"encoding/json"
+	"strings"
+
 )
 
 func main() {
@@ -76,32 +78,42 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-    Body string `json:"body"`
-}
+	type parameters struct{ Body string `json:"body"` }
 
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
-		w.Write([]byte(`{"error":"Something went wrong"}`))
-    return
+	var params parameters
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithError(w, 400, "Something went wrong")
+		return
 	}
-
-	
 	if len(params.Body) > 140 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
-		w.Write([]byte(`{"error":"Chirp is too long"}`))
+		respondWithError(w, 400, "Chirp is too long")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	w.Write([]byte(`{"valid":true}`))
-
+	cleaned := sanitizeChirp(params.Body)
+	respondWithJSON(w, 200, map[string]string{"cleaned_body": cleaned})
 }
 
+func sanitizeChirp (body string) string {
+	banned := map[string]struct{}{
+    "kerfuffle": {},
+    "sharbert":  {},
+    "fornax":    {},
+}
+
+tokens := strings.Split(body, " ")
+result := make([]string, 0, len(tokens))
+	
+    for _, tok := range tokens {
+        if tok == "" {
+            continue 
+        }
+        if _, found := banned[strings.ToLower(tok)]; found {
+            result = append(result, "****")
+        } else {
+            result = append(result, tok)
+        }
+    }
+
+    return strings.Join(result, " ")
+}
