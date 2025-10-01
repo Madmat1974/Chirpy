@@ -57,6 +57,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", cfg.handlerChirps)
 	mux.HandleFunc("POST /api/users", cfg.userCreate)
 	mux.HandleFunc("GET /api/chirps", cfg.retrieveChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.retrieveChirp)
 	fmt.Printf("Starting server on %s", server.Addr)
 	err = server.ListenAndServe()
 	if err != nil {
@@ -156,6 +157,28 @@ type ChirpResponse struct {
 type ChirpCreateParams struct {
 	Body 	string `json:"body"`
 	UserID	string `json:"user_id"`
+}
+
+func(cfg *apiConfig) retrieveChirp(w http.ResponseWriter, r *http.Request) {
+	chir := ChirpResponse{}
+	chirpPath := r.PathValue("chirpID")
+	idPath, err := uuid.Parse(chirpPath)
+	if err != nil {
+		respondWithError(w, 400, "Invalid uuid entered")
+		return
+	}
+
+	dbChirp, err := cfg.db.GetChirp(r.Context(), idPath)
+	if err != nil{
+		respondWithError(w, 404, "Chirp not found")
+		return
+	}
+	chir.Id = dbChirp.ID
+	chir.Createdat = dbChirp.CreatedAt
+	chir.Updatedat = dbChirp.UpdatedAt
+	chir.Body = dbChirp.Body
+	chir.Userid = dbChirp.UserID
+	respondWithJSON(w, 200, chir)
 }
 
 func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, r *http.Request) {
