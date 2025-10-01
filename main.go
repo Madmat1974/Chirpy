@@ -9,6 +9,7 @@ import (
     "strings"
 	"sync/atomic"
     "time"
+	
 
     "github.com/joho/godotenv"
     _ "github.com/lib/pq"
@@ -53,7 +54,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /admin/metrics", cfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
-	mux.HandleFunc("POST /api/validate_chirp", cfg.handlerValidateChirp)
+	mux.HandleFunc("POST /api/chirps", cfg.handlerChirps)
 	mux.HandleFunc("POST /api/users", cfg.userCreate)
 
 	fmt.Printf("Starting server on %s", server.Addr)
@@ -144,21 +145,63 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) { // 
     w.WriteHeader(http.StatusOK)
 }
 
-func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Request) {
-	type parameters struct{ Body string `json:"body"` }
+type ChirpResponse struct {
+    Id        uuid.UUID    `json:"id"`
+    Createdat time.Time `json:"created_at"`
+    Updatedat time.Time `json:"updated_at"`
+    Body      string    `json:"body"`
+    Userid    uuid.UUID    `json:"user_id"`
+}
 
-	var params parameters
-	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+type ChirpCreateParams struct {
+	Body 	string `json:"body"`
+	UserID	string `json:"user_id"`
+}
+
+func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
+	id := uuid.New()
+	var paramsinsert ChirpCreateParams
+
+	
+	if err := json.NewDecoder(r.Body).Decode(&paramsinsert); err != nil {
 		respondWithError(w, 400, "Something went wrong")
 		return
 	}
-	if len(params.Body) > 140 {
+	if len(paramsinsert.Body) > 140 {
 		respondWithError(w, 400, "Chirp is too long")
 		return
 	}
 
-	cleaned := sanitizeChirp(params.Body)
-	respondWithJSON(w, 200, map[string]string{"cleaned_body": cleaned})
+	uid, err := uuid.Parse(paramsinsert.UserID)
+	if err != nil {
+		respondWithError(w, 400, "user_id must be a valid UUID")
+		return
+	}
+
+	cleaned := sanitizeChirp(paramsinsert.Body)
+
+	
+
+	arg := database.CreateChirpParams{
+		ID:			id,
+		Body:		cleaned,
+		UserID:		uid,
+	}
+	chirp, err := cfg.db.CreateChirp(r.Context(), arg)
+	if err != nil {
+		respondWithError(w, 500, "Couldn't create chirp")
+		return
+	}
+	
+	var chirpy ChirpResponse
+	chirpy.Id = chirp.ID
+	//chirpy.created_at = chirp.CreatedAt
+	//chirpy.updated_at = chirp.UpdatedAt
+	chirpy.Body = chirp.Body
+	chirpy.Userid = chirp.UserID
+
+	respondWithJSON(w, 201, chirpy)
+	
 }
 
 func sanitizeChirp (body string) string {
