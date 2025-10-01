@@ -9,7 +9,7 @@ import (
     "strings"
 	"sync/atomic"
     "time"
-	
+	"github.com/Madmat1974/Chirpy.git/internal/auth"
 
     "github.com/joho/godotenv"
     _ "github.com/lib/pq"
@@ -58,6 +58,7 @@ func main() {
 	mux.HandleFunc("POST /api/users", cfg.userCreate)
 	mux.HandleFunc("GET /api/chirps", cfg.retrieveChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.retrieveChirp)
+	mux.HandleFunc("POST /api/login", cfg.loginUser)
 	fmt.Printf("Starting server on %s", server.Addr)
 	err = server.ListenAndServe()
 	if err != nil {
@@ -78,7 +79,8 @@ type apiConfig struct {
 }
 
 type userCreateParams struct {
-	Email string `json:"email"`
+	Password	string `json:"password"`
+	Email 		string `json:"email"`
 }
 
 type User struct {
@@ -88,18 +90,79 @@ type User struct {
 	Email		string	  `json:"email"`
 }
 
+func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
+	var params userCreateParams
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	if strings.TrimSpace(params.Password) == "" {
+		respondWithError(w, http.StatusBadRequest, "password required")
+		return
+	}
+	finduser, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "user not found")
+		return
+	}
+
+	if !finduser.HashedPassword.Valid {
+    // Handle the case where the password is NULL
+    // This might happen for users created before the password column was added
+    respondWithError(w, 401, "Incorrect email or password")
+    return
+}
+	pcheck, err := auth.CheckPasswordHash(params.Password, finduser.HashedPassword.String)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "problem validating password")
+			return
+		}
+		if pcheck == false {
+			respondWithError(w, 401, "invalid email or password")
+			return
+		}
+		
+		resp := User {
+		ID:			finduser.ID,
+		CreatedAt:	finduser.CreatedAt,
+		UpdatedAt:	finduser.UpdatedAt,
+		Email:		finduser.Email,
+	}
+	respondWithJSON(w, 200, resp)
+}
+
+
 func (cfg *apiConfig) userCreate(w http.ResponseWriter, r *http.Request) {
 	var params userCreateParams
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 		respondWithError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+
+	if strings.TrimSpace(params.Password) == "" {
+		respondWithError(w, http.StatusBadRequest, "password required")
+		return
+	}
+
+	phash, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not use password")
+		return
+	}
+
 	if strings.TrimSpace(params.Email) == "" {
 		respondWithError(w, http.StatusBadRequest, "email required")
 		return
 	}
+	dbUser, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
+    Email:          params.Email,
+    HashedPassword: sql.NullString{
+		String: phash,
+		Valid: true,
+	},
+	})
 
-	dbUser, err := cfg.db.CreateUser(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "could not create user")
 		return
