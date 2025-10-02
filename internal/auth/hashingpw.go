@@ -3,6 +3,9 @@ package auth
 import (
 	"log"
 	"github.com/alexedwards/argon2id"
+	"time"
+	"github.com/google/uuid"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func HashPassword(password string) (string, error){
@@ -19,4 +22,42 @@ func CheckPasswordHash(password, hash string) (bool, error) {
 		log.Fatal(err)
 	}
 	return match, err
+}
+
+func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+	claims := jwt.RegisteredClaims{
+		Issuer:		"chirpy",
+		IssuedAt:	jwt.NewNumericDate(time.Now().UTC()),
+		ExpiresAt:	jwt.NewNumericDate(time.Now().UTC().Add(expiresIn)),
+		Subject:	userID.String(),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	ss, err := token.SignedString([]byte(tokenSecret))
+	if err != nil {
+		return "", err
+	}
+	return ss, nil
+}
+
+func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
+	claimsStruct := jwt.RegisteredClaims{}
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		&claimsStruct,
+		func(token *jwt.Token) (interface{}, error) {
+			return []byte(tokenSecret), nil
+		},
+	)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	subjectString, err := token.Claims.GetSubject()
+	if err != nil {
+		return uuid.Nil, err
+	}
+	id, err := uuid.Parse(subjectString)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
 }
