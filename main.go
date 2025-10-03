@@ -83,7 +83,7 @@ type apiConfig struct {
 type userCreateParams struct {
 	Password			string 	`json:"password"`
 	Email 				string 	`json:"email"`
-	ExpiresInSeconds	*int	`json:"expires_in_seconds"`
+	
 }
 
 type User struct {
@@ -126,28 +126,43 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-	exp := 3600
-	if params.ExpiresInSeconds != nil {
-    	if *params.ExpiresInSeconds < exp {
-        	exp = *params.ExpiresInSeconds
-    	}
-	}
-	token, err := auth.MakeJWT(finduser.ID, cfg.secret, time.Duration(exp)*time.Second)
+	
+	token, err := auth.MakeJWT(finduser.ID, cfg.secret, time.Hour)
 	if err != nil {
     	respondWithError(w, http.StatusInternalServerError, "could not create token")
     	return
 	}
+
+	rt, err := auth.MakeRefreshToken()
+	if err != nil {
+    	respondWithError(w, http.StatusInternalServerError, "could not create refresh token")
+    	return
+	}
+	if _, err := cfg.db.RefreshToken(r.Context(), database.RefreshTokenParams{
+    	Token:  rt,
+    	UserID: finduser.ID,
+	}); err != nil {
+    	respondWithError(w, http.StatusInternalServerError, "could not persist refresh token")
+    	return
+	}
+
+
 		
 	respondWithJSON(w, 200, struct {
-    	ID        uuid.UUID `json:"id"`
-    	CreatedAt time.Time `json:"created_at"`
-    	UpdatedAt time.Time `json:"updated_at"`
-    	Email     string    `json:"email"`
-    	Token     string    `json:"token"`
+    	ID        		uuid.UUID 	`json:"id"`
+    	CreatedAt 		time.Time 	`json:"created_at"`
+    	UpdatedAt 		time.Time 	`json:"updated_at"`
+    	Email     		string    	`json:"email"`
+    	Token     		string    	`json:"token"`
+		RefreshToken	string		`json:"refresh_token"`
 	}{
-    	ID: finduser.ID, CreatedAt: finduser.CreatedAt, UpdatedAt: finduser.UpdatedAt,
-    	Email: finduser.Email, Token: token,
-	})
+    	ID: finduser.ID,
+    	CreatedAt: finduser.CreatedAt,
+    	UpdatedAt: finduser.UpdatedAt,
+    	Email: finduser.Email,
+    	Token: token,
+    	RefreshToken: rt,
+})
 }
 
 
