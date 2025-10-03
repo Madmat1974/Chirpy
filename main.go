@@ -33,6 +33,7 @@ func main() {
 	cfg := apiConfig{
     db:       queries,
     platform: os.Getenv("PLATFORM"),
+	secret: os.Getenv("JWT_SECRET"),
 }
 	const filepathRoot = "."
 	mux := http.NewServeMux()
@@ -74,13 +75,15 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 
 type apiConfig struct {
 	fileserverHits 	atomic.Int32
-	db 		*database.Queries
-	platform string
+	db 			*database.Queries
+	platform 	string
+	secret 		string
 }
 
 type userCreateParams struct {
-	Password	string `json:"password"`
-	Email 		string `json:"email"`
+	Password			string 	`json:"password"`
+	Email 				string 	`json:"email"`
+	ExpiresInSeconds	*int	`json:"expires_in_seconds"`
 }
 
 type User struct {
@@ -122,14 +125,29 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 			respondWithError(w, 401, "invalid email or password")
 			return
 		}
-		
-		resp := User {
-		ID:			finduser.ID,
-		CreatedAt:	finduser.CreatedAt,
-		UpdatedAt:	finduser.UpdatedAt,
-		Email:		finduser.Email,
+
+	exp := 3600
+	if params.ExpiresInSeconds != nil {
+    	if *params.ExpiresInSeconds < exp {
+        	exp = *params.ExpiresInSeconds
+    	}
 	}
-	respondWithJSON(w, 200, resp)
+	token, err := auth.MakeJWT(finduser.ID, cfg.secret, time.Duration(exp)*time.Second)
+	if err != nil {
+    	respondWithError(w, http.StatusInternalServerError, "could not create token")
+    	return
+	}
+		
+	respondWithJSON(w, 200, struct {
+    	ID        uuid.UUID `json:"id"`
+    	CreatedAt time.Time `json:"created_at"`
+    	UpdatedAt time.Time `json:"updated_at"`
+    	Email     string    `json:"email"`
+    	Token     string    `json:"token"`
+	}{
+    	ID: finduser.ID, CreatedAt: finduser.CreatedAt, UpdatedAt: finduser.UpdatedAt,
+    	Email: finduser.Email, Token: token,
+	})
 }
 
 
@@ -219,7 +237,7 @@ type ChirpResponse struct {
 
 type ChirpCreateParams struct {
 	Body 	string `json:"body"`
-	UserID	string `json:"user_id"`
+	
 }
 
 func(cfg *apiConfig) retrieveChirp(w http.ResponseWriter, r *http.Request) {
@@ -264,10 +282,19 @@ func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
-	id := uuid.New()
-	var paramsinsert ChirpCreateParams
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Authorization header missing or invalid")
+		return
+	}
 
-	
+	userID, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+
+	var paramsinsert ChirpCreateParams	
 	if err := json.NewDecoder(r.Body).Decode(&paramsinsert); err != nil {
 		respondWithError(w, 400, "Something went wrong")
 		return
@@ -277,20 +304,11 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	uid, err := uuid.Parse(paramsinsert.UserID)
-	if err != nil {
-		respondWithError(w, 400, "user_id must be a valid UUID")
-		return
-	}
-
 	cleaned := sanitizeChirp(paramsinsert.Body)
-
-	
-
 	arg := database.CreateChirpParams{
-		ID:			id,
+		ID:			uuid.New(),
 		Body:		cleaned,
-		UserID:		uid,
+		UserID:		userID,
 	}
 	chirp, err := cfg.db.CreateChirp(r.Context(), arg)
 	if err != nil {
@@ -298,14 +316,13 @@ func (cfg *apiConfig) handlerChirps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	var chirpy ChirpResponse
-	chirpy.Id = chirp.ID
-	//chirpy.created_at = chirp.CreatedAt
-	//chirpy.updated_at = chirp.UpdatedAt
-	chirpy.Body = chirp.Body
-	chirpy.Userid = chirp.UserID
-
-	respondWithJSON(w, 201, chirpy)
+	respondWithJSON(w, 201, ChirpResponse{
+		Id:			chirp.ID,
+		Createdat:	chirp.CreatedAt,
+		Updatedat:	chirp.UpdatedAt,
+		Body:		chirp.Body,
+		Userid:		chirp.UserID,
+	})
 	
 }
 

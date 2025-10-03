@@ -7,6 +7,7 @@ import (
     "github.com/google/uuid"
     "github.com/golang-jwt/jwt/v5"
     "fmt"
+    "net/http"
 )
 
 func TestMakeJWT_Claims(t *testing.T) {
@@ -116,5 +117,38 @@ func TestValidateJWT_WrongSecret(t *testing.T) {
     _, err = ValidateJWT(tok, secret_B)
     if err == nil {
         t.Fatalf("expected ValidateJWT to return an error for wrong secret")
+    }
+}
+
+func TestValidateGBT_CorrectToken(t *testing.T) {
+    headers := http.Header{}
+    headers.Set("Authorization", "Bearer fart")
+    token, err := GetBearerToken(headers)
+
+    if err != nil {
+        t.Fatalf("expected nil error, got %v", err)
+    }
+    if token != "fart" {
+        t.Fatalf("expected token %q, got %q", "fart", token)
+    }
+} 
+
+func TestValidateGBT_MissingHeader(t *testing.T) {
+    headers := http.Header{}
+    token, err := GetBearerToken(headers)
+    if err == nil {
+        t.Fatalf("expected missing header error")
+    }
+    if token != "" {
+        t.Fatalf("expected empty token, got %q", token)
+    }
+}
+
+func TestValidateGBT_MissingHeaderPart(t *testing.T) {
+    headers := http.Header{}
+    headers.Set("Authorization", "fart")
+    _, err := GetBearerToken(headers)
+    if err == nil {
+        t.Fatalf("expected Authorization header")
     }
 }

@@ -6,6 +6,9 @@ import (
 	"time"
 	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
+	"strings"
+	"net/http"
+	"fmt"
 )
 
 func HashPassword(password string) (string, error){
@@ -61,3 +64,20 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	}
 	return id, nil
 }
+
+func GetBearerToken(headers http.Header) (string, error) {
+    auth := headers.Get("Authorization")
+    if auth == "" {
+        return "", fmt.Errorf("missing Authorization header")
+    }
+    if !strings.HasPrefix(auth, "Bearer ") {
+        return "", fmt.Errorf("invalid Authorization header")
+    }
+    token := strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+    if token == "" {
+        return "", fmt.Errorf("empty bearer token")
+    }
+    return token, nil
+}
+
+
