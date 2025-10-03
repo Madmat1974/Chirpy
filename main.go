@@ -62,6 +62,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", cfg.loginUser)
 	mux.HandleFunc("POST /api/refresh", cfg.refresh)
 	mux.HandleFunc("POST /api/revoke", cfg.revoke)
+	mux.HandleFunc("PUT /api/users", cfg.putUser)
 	fmt.Printf("Starting server on %s", server.Addr)
 	err = server.ListenAndServe()
 	if err != nil {
@@ -400,4 +401,67 @@ func (cfg *apiConfig) revoke(w http.ResponseWriter, r *http.Request) {
     return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// go
+func (cfg *apiConfig) putUser(w http.ResponseWriter, r *http.Request) {
+    tok, err := auth.GetBearerToken(r.Header)
+    if err != nil || tok == "" {
+        respondWithError(w, 401, "invalid or missing access token")
+        return
+    }
+
+    userID, err := auth.ValidateJWT(tok, cfg.secret)
+    if err != nil {
+        respondWithError(w, 401, "invalid or missing access token")
+        return
+    }
+
+    type updateParams struct {
+        Email    string `json:"email"`
+        Password string `json:"password"`
+    }
+    type userResponse struct {
+        ID        string    `json:"id"`
+        Email     string    `json:"email"`
+        CreatedAt time.Time `json:"created_at"`
+        UpdatedAt time.Time `json:"updated_at"`
+    }
+
+    var params updateParams
+    if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+        respondWithError(w, http.StatusBadRequest, "invalid JSON")
+        return
+    }
+    if strings.TrimSpace(params.Email) == "" || strings.TrimSpace(params.Password) == "" {
+        respondWithError(w, http.StatusBadRequest, "email and password required")
+        return
+    }
+
+    p, err := auth.HashPassword(params.Password)
+    if err != nil {
+        respondWithError(w, http.StatusInternalServerError, "could not use password")
+        return
+    }
+
+    u, err := cfg.db.UpdateUserByID(r.Context(), database.UpdateUserByIDParams{
+        ID:    userID,
+        Email: params.Email,
+        HashedPassword: sql.NullString{
+            String: p,
+            Valid:  true,
+        },
+    })
+    if err != nil {
+        respondWithError(w, http.StatusInternalServerError, "could not update user")
+        return
+    }
+
+    resp := userResponse{
+        ID:        u.ID.String(),
+        Email:     u.Email,
+        CreatedAt: u.CreatedAt,
+        UpdatedAt: u.UpdatedAt,
+    }
+    respondWithJSON(w, http.StatusOK, resp)
 }
