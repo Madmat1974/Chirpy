@@ -61,6 +61,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.retrieveChirp)
 	mux.HandleFunc("POST /api/login", cfg.loginUser)
 	mux.HandleFunc("POST /api/refresh", cfg.refresh)
+	mux.HandleFunc("POST /api/revoke", cfg.revoke)
 	fmt.Printf("Starting server on %s", server.Addr)
 	err = server.ListenAndServe()
 	if err != nil {
@@ -371,17 +372,32 @@ func (cfg *apiConfig) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := cfg.DB.GetUserFromRefreshToken(r.Context(), tok)
+	u, err := cfg.db.GetUserFromRefreshToken(r.Context(), tok)
 	if err != nil {
     respondWithError(w, http.StatusUnauthorized, "invalid or expired refresh token")
     return
 	}
 
-	jwt, err := auth.MakeJWT(u.ID, cfg.JWT_SECRET, time.Hour)
+	jwt, err := auth.MakeJWT(u.ID, cfg.secret, time.Hour)
 	if err != nil {
     	respondWithError(w, http.StatusInternalServerError, "could not create access token")
     	return
 	}
-	
-	respondWithJSON(w, http.Status.OK, map[string]string{"token":jwt})
+
+	respondWithJSON(w, http.StatusOK, map[string]string{"token":jwt})
+}
+
+func (cfg *apiConfig) revoke(w http.ResponseWriter, r *http.Request) {
+	tok, err := auth.GetBearerToken(r.Header)
+	if err != nil || tok == "" {
+		respondWithError(w, http.StatusUnauthorized, "invalid or missing refresh token")
+		return
+	}
+
+	rows, err := cfg.db.RevokeRefreshToken(r.Context(), tok) 
+	if rows == 0 {
+    respondWithError(w, http.StatusUnauthorized, "invalid or revoked token")
+    return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
