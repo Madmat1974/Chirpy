@@ -60,6 +60,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", cfg.retrieveChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", cfg.retrieveChirp)
 	mux.HandleFunc("POST /api/login", cfg.loginUser)
+	mux.HandleFunc("POST /api/refresh", cfg.refresh)
 	fmt.Printf("Starting server on %s", server.Addr)
 	err = server.ListenAndServe()
 	if err != nil {
@@ -145,9 +146,7 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
     	respondWithError(w, http.StatusInternalServerError, "could not persist refresh token")
     	return
 	}
-
-
-		
+	
 	respondWithJSON(w, 200, struct {
     	ID        		uuid.UUID 	`json:"id"`
     	CreatedAt 		time.Time 	`json:"created_at"`
@@ -363,4 +362,26 @@ result := make([]string, 0, len(tokens))
     }
 
     return strings.Join(result, " ")
+}
+
+func (cfg *apiConfig) refresh(w http.ResponseWriter, r *http.Request) {
+	tok, err := auth.GetBearerToken(r.Header)
+	if err != nil || tok == "" {
+		respondWithError(w, http.StatusUnauthorized, "invalid or missing refresh token")
+		return
+	}
+
+	u, err := cfg.DB.GetUserFromRefreshToken(r.Context(), tok)
+	if err != nil {
+    respondWithError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+    return
+	}
+
+	jwt, err := auth.MakeJWT(u.ID, cfg.JWT_SECRET, time.Hour)
+	if err != nil {
+    	respondWithError(w, http.StatusInternalServerError, "could not create access token")
+    	return
+	}
+	
+	respondWithJSON(w, http.Status.OK, map[string]string{"token":jwt})
 }
