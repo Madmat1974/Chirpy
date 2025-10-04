@@ -17,6 +17,7 @@ import (
     "github.com/google/uuid"
     "github.com/Madmat1974/Chirpy.git/internal/database"
 	"errors"
+	"sort"
 )
 
 
@@ -373,6 +374,7 @@ func(cfg *apiConfig) retrieveChirp(w http.ResponseWriter, r *http.Request) {
 func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, r *http.Request) {
 	rChirps := []ChirpResponse{}
 	aidStr := r.URL.Query().Get("author_id")
+	sortSTR := r.URL.Query().Get("sort")
 
 	var dbChirps []database.Chirp
 	var err error
@@ -401,6 +403,19 @@ func (cfg *apiConfig) retrieveChirps(w http.ResponseWriter, r *http.Request) {
 			Userid:		c.UserID,
 		})
 	}
+
+	//sorting time
+	if sortSTR == "" || sortSTR == "asc" {
+		sort.Slice(rChirps, func(i, j int) bool {
+			return rChirps[i].Createdat.Before(rChirps[j].Createdat)
+		})
+	}
+	if sortSTR == "desc" {
+		sort.Slice(rChirps, func(i, j int) bool {
+			return rChirps[i].Createdat.After(rChirps[j].Createdat)
+	})
+	}
+
 	respondWithJSON(w, 200, rChirps)
 }
 
