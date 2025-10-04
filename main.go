@@ -63,6 +63,7 @@ func main() {
 	mux.HandleFunc("POST /api/refresh", cfg.refresh)
 	mux.HandleFunc("POST /api/revoke", cfg.revoke)
 	mux.HandleFunc("PUT /api/users", cfg.putUser)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.deleteChirp)
 	fmt.Printf("Starting server on %s", server.Addr)
 	err = server.ListenAndServe()
 	if err != nil {
@@ -95,6 +96,46 @@ type User struct {
 	UpdatedAt	time.Time `json:"updated_at"`
 	Email		string	  `json:"email"`
 }
+
+
+func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
+    chirpPath := r.PathValue("chirpID")
+    idPath, err := uuid.Parse(chirpPath)
+    if err != nil {
+        respondWithError(w, http.StatusBadRequest, "invalid chirp id")
+        return
+    }
+
+    token, err := auth.GetBearerToken(r.Header)
+    if err != nil {
+        respondWithError(w, http.StatusUnauthorized, "missing or invalid auth header")
+        return
+    }
+
+    subStr, err := auth.ValidateJWT(token, cfg.secret)
+    if err != nil {
+        respondWithError(w, http.StatusUnauthorized, "invalid token")
+        return
+    }
+  
+    dbChirp, err := cfg.db.GetChirp(r.Context(), idPath)
+    if err != nil {
+        respondWithError(w, http.StatusNotFound, "chirp not found")
+        return
+    }
+
+    if dbChirp.UserID != subStr {
+        respondWithError(w, http.StatusForbidden, "forbidden")
+        return
+    }
+
+    if err := cfg.db.DeleteChirp(r.Context(), idPath); err != nil {
+        respondWithError(w, http.StatusInternalServerError, "could not delete")
+        return
+    }
+    w.WriteHeader(http.StatusNoContent)
+}
+
 
 func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
 	var params userCreateParams
