@@ -35,6 +35,7 @@ func main() {
     db:       queries,
     platform: os.Getenv("PLATFORM"),
 	secret: os.Getenv("JWT_SECRET"),
+	pkey: os.Getenv("POLKA_KEY"),
 }
 	const filepathRoot = "."
 	mux := http.NewServeMux()
@@ -84,6 +85,7 @@ type apiConfig struct {
 	db 			*database.Queries
 	platform 	string
 	secret 		string
+	pkey		string
 }
 
 type userCreateParams struct {
@@ -110,6 +112,15 @@ type Webhooker struct {
 }
 
 func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
+	getkey, err := auth.GetAPIKey(r.Header)
+	if err != nil || getkey == "" {
+		respondWithError(w, http.StatusUnauthorized, "invalid or missing apikey")
+		return
+	}
+	if cfg.pkey != getkey {
+		respondWithError(w, 401, "apikey mismatch")
+	}
+	
 	var payload Webhooker
 
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -122,7 +133,7 @@ func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := cfg.db.UpgradeRedByID(r.Context(), payload.Data.UserID)
+	_, err = cfg.db.UpgradeRedByID(r.Context(), payload.Data.UserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		w.WriteHeader(http.StatusNotFound)
 		return
