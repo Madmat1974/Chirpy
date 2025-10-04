@@ -23,7 +23,7 @@ VALUES (
     $2
     
 )
-RETURNING id, created_at, updated_at, email, hashed_password
+RETURNING id, created_at, updated_at, email, hashed_password, is_chirpy_red
 `
 
 type CreateUserParams struct {
@@ -40,6 +40,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.Email,
 		&i.HashedPassword,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
@@ -54,7 +55,7 @@ func (q *Queries) DeleteUsers(ctx context.Context) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, created_at, updated_at, email, hashed_password
+SELECT id, created_at, updated_at, email, hashed_password, is_chirpy_red
 FROM users
 WHERE email = $1
 `
@@ -68,6 +69,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.Email,
 		&i.HashedPassword,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
@@ -104,5 +106,25 @@ func (q *Queries) UpdateUserByID(ctx context.Context, arg UpdateUserByIDParams) 
 		&i.UpdatedAt,
 		&i.Email,
 	)
+	return i, err
+}
+
+const upgradeRedByID = `-- name: UpgradeRedByID :one
+UPDATE users
+SET
+    is_chirpy_red = TRUE
+WHERE id = $1
+RETURNING id, is_chirpy_red
+`
+
+type UpgradeRedByIDRow struct {
+	ID          uuid.UUID
+	IsChirpyRed bool
+}
+
+func (q *Queries) UpgradeRedByID(ctx context.Context, id uuid.UUID) (UpgradeRedByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, upgradeRedByID, id)
+	var i UpgradeRedByIDRow
+	err := row.Scan(&i.ID, &i.IsChirpyRed)
 	return i, err
 }

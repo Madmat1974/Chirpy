@@ -16,6 +16,7 @@ import (
 
     "github.com/google/uuid"
     "github.com/Madmat1974/Chirpy.git/internal/database"
+	"errors"
 )
 
 
@@ -64,6 +65,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", cfg.revoke)
 	mux.HandleFunc("PUT /api/users", cfg.putUser)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", cfg.deleteChirp)
+	mux.HandleFunc("POST /api/polka/webhooks", cfg.webhooks)
 	fmt.Printf("Starting server on %s", server.Addr)
 	err = server.ListenAndServe()
 	if err != nil {
@@ -95,8 +97,43 @@ type User struct {
 	CreatedAt	time.Time `json:"created_at"`
 	UpdatedAt	time.Time `json:"updated_at"`
 	Email		string	  `json:"email"`
+	IsChirpyRed bool	  `json:"is_chirpy_red"`
 }
 
+type Data struct {
+	UserID uuid.UUID `json:"user_id"`
+}
+
+type Webhooker struct {
+	Event		string	`json:"event"`
+	Data		Data	`json:"data"`
+}
+
+func (cfg *apiConfig) webhooks(w http.ResponseWriter, r *http.Request) {
+	var payload Webhooker
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		respondWithError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	if payload.Event != "user.upgraded" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	_, err := cfg.db.UpgradeRedByID(r.Context(), payload.Data.UserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+
+}
 
 func (cfg *apiConfig) deleteChirp(w http.ResponseWriter, r *http.Request) {
     chirpPath := r.PathValue("chirpID")
@@ -197,6 +234,7 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
     	Email     		string    	`json:"email"`
     	Token     		string    	`json:"token"`
 		RefreshToken	string		`json:"refresh_token"`
+		IsChirpyRed		bool		`json:"is_chirpy_red"`
 	}{
     	ID: finduser.ID,
     	CreatedAt: finduser.CreatedAt,
@@ -204,6 +242,7 @@ func (cfg *apiConfig) loginUser(w http.ResponseWriter, r *http.Request) {
     	Email: finduser.Email,
     	Token: token,
     	RefreshToken: rt,
+		IsChirpyRed: finduser.IsChirpyRed,
 })
 }
 
@@ -244,10 +283,11 @@ func (cfg *apiConfig) userCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := User {
-		ID:			dbUser.ID,
-		CreatedAt:	dbUser.CreatedAt,
-		UpdatedAt:	dbUser.UpdatedAt,
-		Email:		dbUser.Email,
+		ID:				dbUser.ID,
+		CreatedAt:		dbUser.CreatedAt,
+		UpdatedAt:		dbUser.UpdatedAt,
+		Email:			dbUser.Email,
+		IsChirpyRed:	dbUser.IsChirpyRed,
 	}
 	respondWithJSON(w, http.StatusCreated, resp)
 }
